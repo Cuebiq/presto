@@ -14,7 +14,7 @@
 package com.facebook.presto.plugin.redshift;
 
 import com.facebook.presto.plugin.jdbc.BaseJdbcClient;
-import com.facebook.presto.plugin.jdbc.BaseJdbcConfig;
+import com.facebook.presto.plugin.jdbc.ConnectionFactory;
 import com.facebook.presto.plugin.jdbc.DriverConnectionFactory;
 import com.facebook.presto.plugin.jdbc.JdbcConnectorId;
 import com.facebook.presto.plugin.jdbc.JdbcIdentity;
@@ -25,9 +25,14 @@ import org.postgresql.Driver;
 import javax.inject.Inject;
 
 import java.sql.Connection;
+import java.sql.DatabaseMetaData;
 import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.util.Optional;
+import java.util.Properties;
 
+import static com.facebook.presto.plugin.jdbc.DriverConnectionFactory.basicConnectionProperties;
 import static com.facebook.presto.plugin.jdbc.JdbcErrorCode.JDBC_ERROR;
 import static java.lang.String.format;
 
@@ -35,9 +40,15 @@ public class RedshiftClient
         extends BaseJdbcClient
 {
     @Inject
-    public RedshiftClient(JdbcConnectorId connectorId, BaseJdbcConfig config)
+    public RedshiftClient(JdbcConnectorId connectorId, RedshiftConfig config)
     {
-        super(connectorId, config, "\"", new DriverConnectionFactory(new Driver(), config));
+        super(connectorId, config, "\"", connectionFactory(config));
+    }
+
+    private static ConnectionFactory connectionFactory(RedshiftConfig redshiftConfig)
+    {
+        Properties connectionProperties = basicConnectionProperties(redshiftConfig);
+        return new DriverConnectionFactory(new Driver(), redshiftConfig.getConnectionUrl(), connectionProperties);
     }
 
     @Override
@@ -48,6 +59,19 @@ public class RedshiftClient
         PreparedStatement statement = connection.prepareStatement(sql);
         statement.setFetchSize(1000);
         return statement;
+    }
+
+    @Override
+    protected ResultSet getTables(Connection connection, Optional<String> schemaName, Optional<String> tableName)
+            throws SQLException
+    {
+        DatabaseMetaData metadata = connection.getMetaData();
+        Optional<String> escape = Optional.ofNullable(metadata.getSearchStringEscape());
+        return metadata.getTables(
+                connection.getCatalog(),
+                escapeNamePattern(schemaName, escape).orElse(null),
+                escapeNamePattern(tableName, escape).orElse(null),
+                new String[] {"TABLE", "VIEW", "MATERIALIZED VIEW", "FOREIGN TABLE"});
     }
 
     @Override
